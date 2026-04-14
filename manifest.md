@@ -454,5 +454,117 @@ Bağlam: BulkActionBar içinde bir işleme etiket atanırken TagPicker bileşeni
 
 
 
+### FAZ 33: Hesaplar Arası Transfer Motoru (Account Transfer Engine)
+Bağlam: Şu an vadesiz hesaptan kredi kartı borcu ödeme veya tasarruf hesabına para aktarma gibi transferler iki ayrı işlem olarak girilmek zorunda ve net serveti iki kez etkiliyor. Transfer kavramı mevcut veri modelinde yok.
+
+- [ ] 33.1: **Transfer Schema:** `transactions` tablosuna `transfer_pair_id` (UUID, nullable) kolonunun migration ile eklenmesi. Aynı `transfer_pair_id`'ye sahip iki işlem birbirinin "karşı tarafı" sayılır.
+- [ ] 33.2: **Transfer Service:** `createTransfer(fromAssetId, toAssetId, amount, date, description)` fonksiyonunun `financeService.ts`'e eklenmesi. Çağrı, iki işlemi atomik (tek Supabase `rpc` çağrısı) olarak yazar: biri gider (kaynak), diğeri gelir (hedef).
+- [ ] 33.3: **Net Worth Neutrality Guard:** `SafeToSpendEngine` ve `ForecastEngine`'in transfer çiftlerini (transfer_pair_id dolu işlemler) hesaplamalardan hariç tutması. Net servet çift sayılmaz.
+- [ ] 33.4: **Transfer UI (TransactionForm):** `TransactionForm.tsx`'e "Hesaplar Arası Transfer" modu eklenmesi. Mod seçildiğinde kategori alanı gizlenir; "Kaynak Hesap" ve "Hedef Hesap" dropdown'ları görünür.
+- [ ] 33.5: **Transfer Badge (TransactionRow):** `TransactionList`'te transfer çiftlerinin ⇄ ikonu ve "Transfer" etiketi ile görsel olarak ayrıştırılması. Satıra tıklandığında karşı işleme deep-link verilmesi.
+- [ ] 33.6: **Transfer Edit/Delete Guard:** Bir transfer işlemi silindiğinde veya düzenlendiğinde karşı çiftin de aynı anda güncellenmesi (cascade). Yetim transfer kaydı bırakılmaz.
+
+
+
+### FAZ 34: SMS ve Bildirim Parser'ı (SMS Import Engine)
+Bağlam: Türk bankaları her işlem için SMS gönderir. Fiziksel ekstre olmadan hızlı veri girişi için kullanıcının bu SMS'leri yapıştırabileceği bir parser, mevcut AdapterRegistry mimarisiyle doğal olarak uyumludur.
+
+- [ ] 34.1: **SMS Adapter Interface:** `parser.ts` içindeki `BankAdapter` interface'ine `parseSMS(text: string): ParsedTransaction[]` metodunun eklenmesi. Tüm mevcut adaptörlerde varsayılan boş implementasyon döner (kırılmaz).
+- [ ] 34.2: **İş Bankası SMS Adapter:** İş Bankası bildirim formatı için regex deseni:
+  - Format: `"Hes.[son 4 hane]: [tarih] [açıklama] [tutar]TL"`
+  - Tutar ve yön (Giriş/Çıkış) normalizasyonu mevcut `normalizeAmount()` ile yapılır.
+- [ ] 34.3: **Enpara SMS Adapter:** Enpara/QNB bildirim formatı için adapter genişletmesi.
+- [ ] 34.4: **Garanti SMS Adapter:** Garanti BBVA bildirim formatı için adapter (15.14 ile birlikte tamamlanır).
+- [ ] 34.5: **SMS Import UI:** `FileUploader.tsx`'e "SMS Yapıştır" sekmesinin eklenmesi. `<textarea>` alanına birden fazla SMS satır satır yapıştırılabilir. Parser tüm satırları sırayla dener, tanımlananları `ImportPreviewModal`'a gönderir.
+- [ ] 34.6: **Multi-SMS Batch Parse:** Birden fazla SMS'in tek seferde yapıştırılıp toplu olarak önizleme ekranına aktarılması. Her satır bağımsız parse edilir; tanınmayanlar kırmızı "Tanınamadı" etiketi ile listelenir.
+
+
+
+### FAZ 35: Bölünmüş İşlem Desteği (Split Transaction)
+Bağlam: Market alışverişi gibi tek fatura birden fazla kategoriye aittir. Şu an tüm tutar tek kategoriye gider; bu analitik kalitesini düşürür.
+
+- [ ] 35.1: **Split Schema:** `transaction_splits` tablosunun oluşturulması.
+  - Kolonlar: `id`, `transaction_id` (FK), `category_id` (FK), `amount` (NUMERIC 15,2), `description`, `metadata`.
+  - Kural: Split'lerin toplamı `transactions.amount`'a eşit olmalıdır (DB CHECK constraint).
+- [ ] 35.2: **Split Service:** `financeService.ts`'e `createSplits`, `updateSplits`, `deleteSplits` fonksiyonlarının eklenmesi. Ana işlem ve split'ler atomik olarak yazılır.
+- [ ] 35.3: **Split UI (TransactionForm):** "Bu işlemi böl" toggle'ı. Aktifleştiğinde kategori alanının yerini dinamik satır listesi alır; her satırda kategori + tutar girilebilir. Geri kalan tutar anlık hesaplanır ve sıfıra ulaşana kadar "Kaydet" butonu pasif kalır.
+- [ ] 35.4: **Split Badge (TransactionRow):** Split'li işlemlerin yanında "÷ 3 kategori" gibi küçük bir badge gösterimi. Tıklandığında split detay tooltip'i açılır.
+- [ ] 35.5: **Analytics Engine Split Support:** `AnalyticsEngine` ve `InsightsEngine`'in kategori bazlı harcama hesaplamalarında `transaction_splits` tablosunu da dahil etmesi. Ana işlem yerine split tutarları kullanılır.
+- [ ] 35.6: **Import Split Suggestion:** `ImportPreviewModal`'da, RuleEngine birden fazla kural eşleştirdiğinde "Bu işlemi böl?" önerisinin gösterilmesi.
+
+
+
+### FAZ 36: Yeni Banka Adaptörleri (Bank Adapter Expansion)
+Bağlam: Mevcut AdapterRegistry altyapısı (Faz 15.17) yeni adaptörler eklemeye hazır. Her adaptör `canHandle`, `inferType`, `parsePDF`, `parseExcel` metodlarını implement eder.
+
+- [ ] 36.1: **Yapı Kredi PDF Adapter:** Yapı Kredi hesap hareketi ve kredi kartı ekstresi PDF formatı için adaptör.
+  - `canHandle`: "YAPI KREDİ" veya "YAPI VE KREDİ" anahtar kelimesi kontrolü.
+  - Tarih formatı: `DD.MM.YYYY`; tutar formatı: Türk binlik ayırıcı.
+- [ ] 36.2: **Akbank PDF Adapter:** Akbank ekstre formatı için adaptör.
+  - `canHandle`: "AKBANK" veya "AKB" anahtar kelimesi kontrolü.
+- [ ] 36.3: **Ziraat Bankası PDF Adapter:** Ziraat Bankası hesap hareketi formatı için adaptör.
+  - `canHandle`: "ZİRAAT BANKASI" veya "T.C. ZİRAAT" kontrolü.
+- [ ] 36.4: **Vakıfbank / Halkbank PDF Adapter:** Devlet bankası ekstre formatları için ortak adaptör. `canHandle` içinde ikisini de tanır.
+- [ ] 36.5: **Papara CSV/Excel Adapter:** Papara işlem geçmişi Excel export formatı için adaptör.
+  - GenericExcelAdapter'dan türetilir; Papara kolon şemasına özel başlık eşleştirmesi yapılır.
+- [ ] 36.6: **Adapter Test Suite:** `scripts/` altına her yeni adaptör için `test-[banka]-adapter.ts` dosyası eklenmesi. Gerçek ekstre örneğiyle parse edilen işlem sayısı ve tutar toplamı doğrulanır.
+- [ ] 36.7: **Adapter Detection UI (15.22 Tamamlama):** `ImportPreviewModal` başlığında tespit edilen adaptörün adı ve güven skoru `(Tespit: İş Bankası — %94)` olarak gösterilmesi.
+
+
+
+### FAZ 37: Tekrarlayan İşlem Şablonları (Recurring Transaction Templates)
+Bağlam: `schedules` tablosu veritabanında mevcut (Faz 1.6) ancak UI'ı eksik. Kira, maaş, aidat gibi sabit döngüsel işlemler için şablon tanımlanıp tek tıkla oluşturulabilmeli.
+
+- [ ] 37.1: **Schedules CRUD Service:** `financeService.ts`'e `createSchedule`, `updateSchedule`, `deleteSchedule`, `getSchedules` fonksiyonlarının eklenmesi. `rotation_type`: MONTHLY, WEEKLY, YEARLY, CUSTOM.
+- [ ] 37.2: **Schedules Store:** `useFinanceStore.ts`'e `schedules` state'i ve ilgili aksiyonların eklenmesi.
+- [ ] 37.3: **Schedule Management UI:** `/settings` altına "Tekrarlayan Ödemeler" sayfasının eklenmesi (`/settings/schedules`).
+  - Liste: Şablon adı, tutar, sıklık, son tetiklenme tarihi, sonraki tetiklenme tarihi.
+  - CRUD: Yeni şablon oluşturma, düzenleme, duraklatma, silme.
+- [ ] 37.4: **One-Click Apply:** Bir şablonun "Bugün Uygula" butonu ile anında işlem oluşturması. Kategori, tutar ve açıklama otomatik doldurulur; kullanıcı onaylayarak kaydeder.
+- [ ] 37.5: **Subscription Radar Integration:** `SubscriptionRadar.ts`'in tespit ettiği tekrarlayan ödemeleri otomatik şablon önerisi olarak sunması. "Bu ödemeyi şablon olarak kaydet?" bildirimi.
+- [ ] 37.6: **Upcoming Payments Widget:** Dashboard'daki "Yaklaşan Ödemeler" bileşeninin aktif şablonlardan dinamik olarak beslenmesi (şu an statik). Sonraki 30 güne ait tahmini ödemeler listelenir.
+
+
+
+### FAZ 38: Finansal Rapor PDF Üretici (Financial Report Generator)
+Bağlam: Mevcut export sadece Excel/JSON. Muhasebeciye veya vergi beyanı için hazır, okunabilir bir PDF rapor çıktısı yüksek talep göreceği öngörülen bir özelliktir.
+
+- [ ] 38.1: **Report Engine Service:** `src/services/ReportEngine.ts` dosyasının oluşturulması. Supabase'den veri çeker, rapor nesne modelini (`ReportData`) oluşturur. Dış kütüphane bağımlılığı yoktur.
+- [ ] 38.2: **HTML-to-PDF Pipeline:** Raporun önce React bileşeni olarak render edilmesi, ardından `window.print()` + print-only CSS ile PDF'e dönüştürülmesi. `pdfjs-dist` veya ek kütüphane gerektirmez.
+- [ ] 38.3: **Aylık Özet Raporu:** Seçilen ay için şu bölümleri içeren rapor şablonu:
+  - Gelir / Gider / Net Özet kartları.
+  - Kategorilere göre harcama tablosu (tutar + yüzde).
+  - Bütçe performansı (Hedef vs Gerçekleşen).
+  - İlk 10 işlem listesi.
+- [ ] 38.4: **Net Varlık Raporu:** Tüm varlıklar, borçlar ve alacaklar dahil anlık bilanço özeti. ROI değerleri `RevaluationEngine`'den çekilir.
+- [ ] 38.5: **Yıllık Özet Raporu:** 12 aylık gelir/gider trend tablosu. En yüksek harcama kategorileri. Yıl içi tasarruf hedefi performansı.
+- [ ] 38.6: **Report Export UI:** `/transactions` ve Dashboard'a "Rapor Oluştur" butonu eklenmesi. Tarih aralığı seçimi (aylık/yıllık/özel). Rapor önizleme modal'ı ile PDF indirme.
+
+
+
+### FAZ 39: Çok Kullanıcılı Aile Paneli (Family Multi-User Panel)
+Bağlam: `profiles` tablosunda `family_id` kolonu mevcut (Faz 1.1) ancak hiç kullanılmıyor. RLS altyapısı da aile grubunu destekleyecek şekilde tasarlanmış. Bu faz mevcut temeli aktive eder.
+
+- [ ] 39.1: **Family Schema Activation:** `profiles` tablosuna `family_id` FK constraint'inin eklenmesi. Yeni `families` tablosu: `id`, `name`, `owner_id`, `metadata`.
+- [ ] 39.2: **Family RLS Policies:** Tüm tablolardaki RLS politikalarının `user_id = auth.uid() OR family_id = (SELECT family_id FROM profiles WHERE id = auth.uid())` şeklinde güncellenmesi.
+- [ ] 39.3: **Invite System:** Aile sahibinin e-posta ile üye davet edebildiği Supabase Edge Function. Davet kabul edildiğinde `profiles.family_id` güncellenir.
+- [ ] 39.4: **Shared vs Personal Toggle:** Her işlemde "Ortak Harcama" / "Kişisel Harcama" ayrımı için `transactions.metadata.is_shared` bayrağı. Filtreleme UI'ına "Sadece ortak" seçeneği eklenir.
+- [ ] 39.5: **Family Dashboard:** Aile üyelerinin harcama katkısını gösteren özet panel. "Bu ay kim ne kadar harcadı?" pasta grafiği. Toplam aile bütçesi vs gerçekleşen.
+- [ ] 39.6: **Debt Rebalancing (Faz 2.6 Aktivasyon):** Mevcut `src/lib/rebalance.ts` mantığının aile üyeleri bazında aktive edilmesi. "X kişi Y kişiye Z TL borçlu" özeti Dashboard'a eklenir.
+
+
+
+### FAZ 40: Makbuz ve Fiş Tarama (Receipt OCR Scanner)
+Bağlam: PDF ekstre olmayan fiziksel harcamaları (market, restoran) manuel girmek yerine telefon kamerasıyla fişi okutarak anında işlem oluşturma. Capacitor altyapısı (Faz 6.1) mevcuttur.
+
+- [ ] 40.1: **Camera Capture (Capacitor):** `@capacitor/camera` plugin'inin kurulumu. iOS `Info.plist`'e `NSCameraUsageDescription` eklenmesi. `npx cap sync` ile native projenin güncellenmesi.
+- [ ] 40.2: **OCR Service (Client-Side):** `Tesseract.js` kütüphanesinin entegrasyonu. `src/services/OCRService.ts` dosyasının oluşturulması. Görüntü → ham metin dönüşümü.
+- [ ] 40.3: **Receipt Parser:** `OCRService`'ten gelen ham metinden tutar, tarih ve mağaza adının çıkarılması. Türkçe fiş formatları için regex desenleri (TOPLAM / TUTAR / KDV dahil).
+- [ ] 40.4: **Receipt Adapter (AdapterRegistry):** `ReceiptAdapter`'ın AdapterRegistry'ye eklenmesi. `canHandle`: OCR çıktısından geldiğini belirten `source: 'ocr'` bayrağı kontrolü.
+- [ ] 40.5: **Camera UI:** `TransactionForm.tsx`'e kamera ikonu butonu eklenmesi. Native platformda kamera açılır, web'de `<input type="file" accept="image/*" capture>` kullanılır. OCR sonucu tutar/açıklama alanlarını otomatik doldurur.
+- [ ] 40.6: **ImportPreviewModal Integration:** OCR ile taranan fişin mevcut önizleme akışına gönderilmesi. Kullanıcı kategori ve etiket atayarak onaylar. Fiş görüntüsü `metadata.receipt_image_url` olarak Storage'a yüklenir (Faz 1.11 ile birlikte).
+
+
+
 
 //// Storage Erişimi: Depolama RLS politikalarında şimdilik sadece bireysel user_id kontrolü mü yapalım, yoksa aile grubu (family_id) mantığını hemen dahil edelim mi?
